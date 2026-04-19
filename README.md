@@ -250,7 +250,6 @@ directamente. No se requiere ninguna corrección adicional en `setup.sh`.
 
 ---
 
-
 ## 🔐 Seguridad
 
 - Sin credenciales en el repositorio
