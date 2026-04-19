@@ -41,6 +41,16 @@ else
 fi
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
+# ─── Paso 0.5) Abrir puertos en el firewall ──────────────────────────────────
+echo "[0.5/7] Abriendo puertos 80 y 443 en UFW..."
+if command -v ufw &>/dev/null; then
+    ufw allow 80/tcp  >/dev/null 2>&1 || true
+    ufw allow 443/tcp >/dev/null 2>&1 || true
+    echo "      ✓ Puertos 80 y 443 abiertos en UFW"
+else
+    echo "      UFW no encontrado — asumiendo que los puertos ya están abiertos"
+fi
+
 # ─── Paso 1) Configuración Nginx según fase ───────────────────────────────────
 echo "[1/7] Copiando configuración Nginx..."
 
