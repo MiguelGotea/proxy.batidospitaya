@@ -1,0 +1,24 @@
+name: 🚀 Deploy proxy.batidospitaya.com
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /root/proxy-batidospitaya
+            git pull origin main
+            chmod +x scripts/setup.sh
+            bash scripts/setup.sh
