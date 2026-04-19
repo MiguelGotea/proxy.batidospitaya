@@ -4,6 +4,11 @@ Nginx reverse proxy en el VPS de DigitalOcean que recibe el tráfico de las
 sucursales (Microsoft Access con IPs dinámicas) y lo reenvía a
 `api.batidospitaya.com` con IP fija, eliminando los bloqueos de Cloudflare.
 
+> ✅ **Estado:** Operativo desde 2026-04-19
+> ```json
+> {"status":"success","message":"pong","timestamp":1776636336}
+> ```
+
 ---
 
 ## ¿Por qué existe este proyecto?
@@ -29,7 +34,7 @@ Access (sucursales, IP dinámica)
   │  HTTPS → proxy.batidospitaya.com
   ▼
 VPS DigitalOcean — 198.211.97.243 (IP fija)
-  Nginx reverse proxy
+  Nginx 1.24.0 + Let's Encrypt SSL
   │
   │  HTTPS → api.batidospitaya.com
   ▼
@@ -58,9 +63,9 @@ proxy.batidospitaya.com/
 
 **Ruta en el VPS:** `/root/proxy-batidospitaya`
 
-> Se usó `/root/proxy-batidospitaya` siguiendo la convención del VPS
-> (`/root/<nombre-proyecto>`). Al ser solo configuración Nginx (no app Node/Python),
-> no necesita entorno virtual ni PM2 — solo el repositorio y el script setup.sh.
+> Sigue la convención `/root/<nombre-proyecto>` del VPS. Al ser solo
+> configuración Nginx (sin Node/Python/PM2), no necesita entorno virtual
+> ni ecosystem.config.js.
 
 ---
 
@@ -68,7 +73,7 @@ proxy.batidospitaya.com/
 
 ### Deploy automático (flujo normal)
 
-Desde Windows, en la carpeta del proyecto:
+Desde Windows, dentro de la carpeta `proxy.batidospitaya.com/`:
 
 ```powershell
 .\.scripts\gitpush.ps1
@@ -80,28 +85,54 @@ Esto hace commit + push → GitHub Actions conecta al VPS por SSH → ejecuta `s
 [Tu PC] → gitpush.ps1 → GitHub → Actions → VPS (SSH) → setup.sh
 ```
 
-### ¿Qué hace setup.sh?
+### ¿Qué hace `setup.sh`?
 
-1. Copia `nginx/proxy.batidospitaya.com.conf` a `/etc/nginx/sites-available/`
-2. Crea symlink en `sites-enabled/` (solo si no existe)
-3. Valida la config con `nginx -t`
-4. Recarga Nginx
-5. Instala certbot si no está
-6. Obtiene/renueva certificado SSL via Let's Encrypt
-7. Recarga Nginx con SSL
-8. Verifica que el proxy responde — rollback automático si falla
+El script es **idempotente** (se puede correr N veces sin romper nada) y
+opera en dos fases según si el certificado SSL ya existe o no:
+
+| Paso | Descripción |
+|------|-------------|
+| [0/7] | Instala Nginx si no está instalado (primera vez lo instala; después solo confirma) |
+| [0.5/7] | Abre puertos 80 y 443 en UFW (idempotente, no duplica reglas) |
+| [1/7] | **FASE 1** (sin cert): escribe config HTTP temporal para que `nginx -t` pase sin SSL<br>**FASE 2** (con cert): copia directamente la config SSL completa del repo |
+| [2/7] | Crea symlink `sites-enabled/` si no existe |
+| [3/7] | `nginx -t` — valida la config; abort si falla |
+| [4/7] | `systemctl reload nginx` |
+| [5/7] | Instala certbot si no está |
+| [6/7] | **FASE 1**: `certbot certonly --nginx` → obtiene cert → activa config SSL completa<br>**FASE 2**: `certbot renew --quiet` |
+| [7/7] | `curl` al endpoint de ping → rollback automático si no responde HTTP 200 |
+
+### ¿Por qué dos fases?
+
+Nginx valida **toda** la config al recargar. El bloque `listen 443 ssl` requiere
+que el certificado exista físicamente en disco. Como certbot aún no corrió en la
+primera instalación, `nginx -t` falla. La solución: config HTTP temporal → certbot
+obtiene cert → config SSL completa.
+
+### Deploy limpio en el VPS (git reset)
+
+El `deploy.yml` usa `git reset --hard origin/main` en lugar de `git pull` para
+garantizar que el VPS siempre refleja exactamente el repo, descartando cualquier
+cambio local que haya quedado de un deploy fallido anterior.
+
+```yaml
+git fetch origin main
+git reset --hard origin/main
+```
 
 ---
 
 ## ✅ Verificar que el proxy funciona
 
-Desde cualquier PC con curl:
-
 ```bash
 curl -v https://proxy.batidospitaya.com/api/ping.php
 ```
 
-Respuesta esperada: **HTTP 200**
+Respuesta esperada:
+```json
+{"status":"success","message":"pong","timestamp":...}
+```
+HTTP 200 — Proxy operativo.
 
 ---
 
@@ -127,16 +158,20 @@ ssh root@198.211.97.243
 # 1. Verificar que Nginx está corriendo
 systemctl status nginx
 
-# 2. Revisar config
+# 2. Revisar sintaxis de config
 nginx -t
 
 # 3. Ver errores recientes
 tail -50 /var/log/nginx/proxy-batidospitaya-error.log
 
-# 4. Verificar DNS
+# 4. Verificar que el DNS resuelve correctamente
 nslookup proxy.batidospitaya.com
+# Debe devolver 198.211.97.243
 
-# 5. Probar conexión directa a la API (sin proxy)
+# 5. Verificar que los puertos están abiertos en UFW
+ufw status | grep -E "80|443"
+
+# 6. Probar conexión directa a la API (sin proxy)
 curl -v https://api.batidospitaya.com/api/ping.php
 ```
 
@@ -153,43 +188,62 @@ systemctl reload nginx
 ```bash
 ln -s /etc/nginx/sites-available/proxy.batidospitaya.com \
       /etc/nginx/sites-enabled/proxy.batidospitaya.com
-systemctl reload nginx
+nginx -t && systemctl reload nginx
 ```
+
+---
+
+## 💡 Notas del VPS
+
+### Nginx es exclusivo de este proyecto
+
+**Nginx no estaba instalado** en el VPS antes de este proyecto.
+PostulacionBotVPS y otros proyectos usan PM2 con FastAPI/Node directamente
+en sus puertos — ninguno necesita Nginx. Este proyecto fue el primero en
+instalarlo.
+
+| Proyecto | Servidor | Nginx |
+|----------|----------|-------|
+| PostulacionBotVPS | FastAPI + PM2 (puerto 8765) | ❌ |
+| Otros bots/scrapers | Node/Python + PM2 | ❌ |
+| **proxy.batidospitaya** | **Nginx 1.24.0** | ✅ |
+
+### GitHub Actions en VS Code
+
+La extensión de GitHub Actions de VS Code muestra el repo según el **git root
+activo**. Como el workspace apunta a `VisualCode/` (carpeta padre con múltiples
+repos), no detecta `proxy.batidospitaya.com/` automáticamente.
+
+Para ver las Actions de este repo:
+- **En GitHub:** `https://github.com/MiguelGotea/proxy.batidospitaya/actions`
+- **En VS Code:** `File → Add Folder to Workspace` → seleccionar `proxy.batidospitaya.com/`
 
 ---
 
 ## 🛡️ WireGuard — Análisis de configuración
 
-Se leyó la configuración actual del VPS en `/etc/wireguard/wg0.conf`.
+Se leyó `/etc/wireguard/wg0.conf` directamente en el VPS.
 
-### Hallazgos:
-
-El VPS actúa como **servidor WireGuard** (no cliente). Los clientes conectados
-son las sucursales (`pitaya`, `villafontana`, `leon`, `matagalpa`, `esteli`,
-`altamira`, `granada`, `lascolinas`, `masaya`, `natura`, `lasbrisas`, `rivas`,
-`unica`, `ticuantepe`, `calli`, `contabilidad`, `sistemas`, `procesamiento`).
-
-**Puntos clave analizados:**
+El VPS actúa como **servidor WireGuard** (no cliente). Los peers son las
+sucursales: `pitaya`, `villafontana`, `leon`, `matagalpa`, `esteli`,
+`altamira`, `granada`, `lascolinas`, `masaya`, `natura`, `lasbrisas`,
+`rivas`, `unica`, `ticuantepe`, `calli`, `contabilidad`, `sistemas`,
+`procesamiento`.
 
 | Aspecto | Resultado |
 |---------|-----------|
-| `AllowedIPs` de cada peer | Solo IPs privadas: `10.66.66.x/32` |
-| ¿`AllowedIPs = 0.0.0.0/0`? | ❌ **No existe** — el VPS NO es cliente de nadie |
+| `AllowedIPs` de cada peer | Solo IPs privadas `10.66.66.x/32` |
+| ¿`AllowedIPs = 0.0.0.0/0`? | ❌ No — el VPS no es cliente de nadie |
 | PostUp/PostDown | Solo MASQUERADE para que los peers salgan por `eth0` |
 | Tráfico saliente del VPS | Sale por `eth0` normalmente |
 
-### Conclusión: ✅ Sin problema de ruteo
+### ✅ Sin problema de ruteo
 
-El VPS es el servidor WireGuard — su tráfico saliente (incluyendo `proxy_pass`
-hacia `api.batidospitaya.com`) **siempre sale por `eth0`**. No hay reglas que
-desvíen el tráfico del VPS por un túnel externo.
+El tráfico de `proxy_pass` hacia `api.batidospitaya.com` sale por `eth0`
+directamente. No se requiere ninguna corrección adicional en `setup.sh`.
 
-**No se requiere ninguna corrección adicional en `setup.sh`** relacionada con
-WireGuard.
-
-> Si en el futuro se agrega el VPS como cliente de otro túnel (con
-> `AllowedIPs = 0.0.0.0/0`), se deberá agregar una ruta de política para que
-> el tráfico a `api.batidospitaya.com` salga por `eth0`:
+> **Nota futura:** Si se agrega el VPS como cliente de otro túnel con
+> `AllowedIPs = 0.0.0.0/0`, agregar ruta de política:
 > ```bash
 > ip rule add to $(dig +short api.batidospitaya.com | tail -1) table main priority 100
 > ```
@@ -198,7 +252,8 @@ WireGuard.
 
 ## 🔐 Seguridad
 
-- No hay credenciales en el repositorio
-- SSL/TLS gestionado por Let's Encrypt (certbot)
-- `proxy_ssl_verify off` es intencional: confía en Cloudflare como destino final
-- El proxy solo acepta tráfico HTTPS (HTTP redirige a HTTPS)
+- Sin credenciales en el repositorio
+- SSL/TLS gestionado por Let's Encrypt (certbot auto-renew via systemd timer)
+- `proxy_ssl_verify off` es intencional: Cloudflare es el destino final de confianza
+- HTTP (puerto 80) redirige automáticamente a HTTPS (301)
+- Puertos 80 y 443 abiertos en UFW, resto bloqueado por defecto
