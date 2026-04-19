@@ -63,6 +63,7 @@ En el repositorio `MiguelGotea/proxy.batidospitaya`:
 
 ---
 
+
 ## Paso 4 — Primer clone en el VPS via SSH
 
 Conectarse al VPS y clonar el repositorio en la ruta del proyecto:
