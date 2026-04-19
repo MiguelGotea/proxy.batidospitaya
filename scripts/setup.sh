@@ -22,6 +22,23 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 echo -e "${YELLOW}  Setup: $DOMINIO${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
+# ─── Paso 0) Instalar Nginx si no está instalado ─────────────────────────────
+echo "[0/7] Verificando Nginx..."
+if ! command -v nginx &>/dev/null; then
+    echo "      nginx no encontrado — instalando..."
+    apt-get update -qq
+    apt-get install -y nginx
+    systemctl enable nginx
+    systemctl start nginx
+    echo "      ✓ nginx instalado y arrancado"
+else
+    echo "      ✓ nginx ya instalado ($(nginx -v 2>&1 | tr -d '\n'))"
+fi
+
+# Garantizar que los directorios de sites existen
+mkdir -p /etc/nginx/sites-available
+mkdir -p /etc/nginx/sites-enabled
+
 # ─── Paso a) Copiar configuración Nginx ──────────────────────────────────────
 echo "[1/7] Copiando configuración Nginx..."
 if [ ! -f "$REPO_NGINX" ]; then
