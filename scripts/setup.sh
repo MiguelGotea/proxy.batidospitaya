@@ -41,8 +41,16 @@ else
 fi
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
-# ─── Paso 0.5) Abrir puertos en el firewall ──────────────────────────────────
-echo "[0.5/7] Abriendo puertos 80 y 443 en UFW..."
+# ─── Paso 0.5) Abrir puertos en el firewall y configurar DNS IPv4 ──────────
+echo "[0.5/7] Configurando red IPv4 y Firewall..."
+# Forzar a Linux a preferir IPv4 sobre IPv6
+if [ -f /etc/gai.conf ]; then
+    sed -i 's/^#precedence ::ffff:0:0\/96  100/precedence ::ffff:0:0\/96  100/' /etc/gai.conf
+    grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
+else
+    echo "precedence ::ffff:0:0/96  100" > /etc/gai.conf
+fi
+
 if command -v ufw &>/dev/null; then
     ufw allow 80/tcp  >/dev/null 2>&1 || true
     ufw allow 443/tcp >/dev/null 2>&1 || true
