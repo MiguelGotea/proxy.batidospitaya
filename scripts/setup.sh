@@ -76,11 +76,15 @@ server {
 
     # Proxy funcional en HTTP mientras no hay cert
     location / {
+        resolver 8.8.8.8 1.1.1.1 ipv6=off valid=300s;
+        resolver_timeout 5s;
         proxy_pass https://api.batidospitaya.com;
         proxy_set_header Host api.batidospitaya.com;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_ssl_name api.batidospitaya.com;
         proxy_ssl_server_name on;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_ssl_verify off;
         proxy_connect_timeout 30s;
         proxy_read_timeout    120s;
