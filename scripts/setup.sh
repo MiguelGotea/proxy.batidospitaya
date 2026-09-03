@@ -41,16 +41,8 @@ else
 fi
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
-# ─── Paso 0.5) Abrir puertos en el firewall y configurar DNS IPv4 ──────────
-echo "[0.5/7] Configurando red IPv4 y Firewall..."
-# Forzar a Linux a preferir IPv4 sobre IPv6
-if [ -f /etc/gai.conf ]; then
-    sed -i 's/^#precedence ::ffff:0:0\/96  100/precedence ::ffff:0:0\/96  100/' /etc/gai.conf
-    grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
-else
-    echo "precedence ::ffff:0:0/96  100" > /etc/gai.conf
-fi
-
+# ─── Paso 0.5) Abrir puertos en el firewall ──────────────────────────────────
+echo "[0.5/7] Abriendo puertos 80 y 443 en UFW..."
 if command -v ufw &>/dev/null; then
     ufw allow 80/tcp  >/dev/null 2>&1 || true
     ufw allow 443/tcp >/dev/null 2>&1 || true
@@ -84,15 +76,11 @@ server {
 
     # Proxy funcional en HTTP mientras no hay cert
     location / {
-        resolver 8.8.8.8 1.1.1.1 ipv6=off valid=300s;
-        resolver_timeout 5s;
         proxy_pass https://api.batidospitaya.com;
         proxy_set_header Host api.batidospitaya.com;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_ssl_name api.batidospitaya.com;
         proxy_ssl_server_name on;
-        proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_ssl_verify off;
         proxy_connect_timeout 30s;
         proxy_read_timeout    120s;
@@ -182,7 +170,6 @@ echo "      ✓ Nginx recargado"
 echo "[7/7] Verificando proxy..."
 RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
     --max-time 15 \
-    -A "PitayaAccess/2.0" \
     "https://$DOMINIO/api/ping.php" 2>/dev/null || echo "000")
 
 if [ "$RESPONSE" = "200" ]; then
