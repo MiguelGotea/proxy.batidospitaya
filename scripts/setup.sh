@@ -182,6 +182,7 @@ echo "      ✓ Nginx recargado"
 echo "[7/7] Verificando proxy..."
 RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
     --max-time 15 \
+    -A "PitayaAccess/2.0" \
     "https://$DOMINIO/api/ping.php" 2>/dev/null || echo "000")
 
 if [ "$RESPONSE" = "200" ]; then
